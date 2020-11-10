@@ -30,8 +30,8 @@ income = st.slider(
     500, 6000, 2310,
     format="%d RM"
 )
-print(trips)
-print(income)
+# print(trips)
+# print(income)
 
 loan_amount = st.slider('How much do you want to borrow?', 300, 800, 500, format="%d RM")
 
