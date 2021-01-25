@@ -1,3 +1,4 @@
+import json
 import time
 import pandas as pd
 import numpy as np
@@ -228,12 +229,31 @@ with col4:
         'Do you have a saving account with pod?',
         ("No", "Not actively saving", "Yes")
     )
-    data_plan = st.radio(
-        'Data plan type:',
-        ("Postpaid", "Prepaid")
-    )
+if pod_user == "Yes":
+    podgoalcol1, podgoalcol2, podgoalcol3 = st.beta_columns(3)
+    with podgoalcol1:
+        goals_count = st.number_input(
+        'Total number of goals:',
+        0,30,0,1,'%d'
+        )
 
-phones = [
+    with podgoalcol2:
+        compelted_goals = st.number_input(
+        'Number of compelted goals:',
+        0,30,0,1,'%d'
+        )
+
+    with podgoalcol3:
+        amount_saved = st.number_input(
+                    'Total amount saved:',
+                    0,50000,0,100, "%f"
+                )
+
+brand, plan = st.beta_columns(2)
+with brand:
+    phone_brand = st.selectbox(
+                'Select your phone brand: ',
+                (
                     'vivo'
                     ,'Realme'
                     ,'OnePlus'
@@ -245,10 +265,34 @@ phones = [
                     ,'Google'
                     ,'OPPO'
                     ,'LGE'
-                    ]
+                )
+    )
+with plan:
+    data_plan = st.radio(
+        'Data plan type:',
+        ("Postpaid", "Prepaid")
+    )
 
 def formatloan(amount):
     return f"RM {amount}"
+
+def geofile_name(name):
+    if name == "Average traveling":
+        return "profile1"
+    elif name == "Traveling for work":
+        return "profile2"
+    elif name == "Frequently traveling":
+        return "profile3"
+
+@st.cache(allow_output_mutation=True)
+def get_state(city):
+    with open("citystate.json") as f:
+        c = json.load(f)
+        for state,j in c.items():
+            if city.strip() in j:
+                return state
+            else:
+                return "Not found"
 
 # User type logic
 applicant_type = st.radio(
@@ -337,18 +381,19 @@ if applicant_type=="Gig economy worker":
     # st.write(np.median(socmed_consumption_hours))
     # st.write(np.std(socmed_consumption_hours))
 
-    phone_manufactorer = phones[np.random.randint(0,len(phones),1)[0]]
+    # phone_manufactorer = phones[np.random.randint(0,len(phones),1)[0]]
     # Set viewport for the deckgl map
     # Load data
     st.header('Geo-location')
-    profile = st.selectbox('Choose a geo-activity profile'
-                ,['profile1', 'profile2', 'profile3']
+    profile_name = st.selectbox('Choose a geo-activity profile'
+                ,['Average traveling', 'Traveling for work', 'Frequently traveling']
                 )
+
+    profile = geofile_name(profile_name)
 
     DATA_URL = (profile+'.csv')
 
     @st.cache(allow_output_mutation=True)
-
     def load_data():
         data = pd.read_csv(DATA_URL)
         return data
@@ -391,26 +436,47 @@ if applicant_type=="Gig economy worker":
     st.header('Loan')
     loan_amount = st.select_slider('How much do you want to borrow?', options=[300, 500, 800], format_func=formatloan)
 
+    if pod_user == "Yes" and amount_saved >0:
+        saved_value = np.log(amount_saved)
+    else:
+        saved_value = 0
+
     feature_dic = {
         "age_score": sqrt(age)%5 if age >=25 else 0,
         "marital_score": ["Single", "Married", "Widow", "Divorced"].index(marital_status),
         "education_score": ['SPM', 'Diploma', 'Associate degree', 'Degree', 'Masters', 'Phd'].index(education),
         "dependant_score": 0 if dependants == 0 else 2 if dependants < 4 else 1,
-        "ncc_score": 1 if ncc ==0 else 0 if ncc==1 else -1
+        "ncc_score": 1 if ncc ==0 else 0 if ncc==1 else -1,
+        "pod_savings": saved_value
     }
-
-    finance_dic = {
+    
+    if get_state(address)=="Selangor" or get_state(address)=="Wilayah Persekutuan":
+    
+        finance_dic = {
+            "total_squared_income": sqrt(gig_w_income*4)-5 if timebase=="Full-time" else sqrt(income+gig_w_income*4)-5,
+            "weekly_squared_income": (sqrt(gig_w_income*4)/4.5)-5 if timebase=="Full-time" else (sqrt(income+gig_w_income*4)/4.5)-5,#sqrt(np.median(weekly_gig_amount)),
+            "insure_score": 1 if gig_insur=="Yes" else 0,
+            "duration_score": (gig_duration/10)*3,
+            # "pod_user": 1 if pod_user=="Yes" else 0
+            "Geo-activity_profile": 10 if profile_name=='Average traveling' else 1 if profile_name=='Traveling for work' else 0,
+            "Location weightage": 5
+        }
+    else:
+        finance_dic = {
         "total_squared_income": sqrt(gig_w_income*4) if timebase=="Full-time" else sqrt(income+gig_w_income*4),
         "weekly_squared_income": sqrt(gig_w_income*4)/4.5 if timebase=="Full-time" else sqrt(income+gig_w_income*4)/4.5,#sqrt(np.median(weekly_gig_amount)),
         "insure_score": 1 if gig_insur=="Yes" else 0,
         "duration_score": (gig_duration/10)*3,
-        "pod_user": 1 if pod_user=="Yes" else 0
+        # "pod_user": 1 if pod_user=="Yes" else 0
+        "Geo-activity_profile": 10 if profile_name=='Average traveling' else 1 if profile_name=='Traveling for work' else 0,
+        "Location weightage": 0
     }
-    if st.button("Evaluate"):
+
+    if st.button("Evaluate", key="evaluate_gig_worker"):
         if (not timebase) or  (len(gig_platform) == 0):
-            st.warning('Sorry!! fields cannot be empty, please fill missing fields')
+            st.error('Sorry!! fields cannot be empty, please fill missing fields')
         else:
-            'Starting a long computation...'
+            'Loan Application is being evaluated...'
             # Add a placeholder
             latest_iteration = st.empty()
             bar = st.progress(0)
@@ -433,22 +499,29 @@ if applicant_type=="Gig economy worker":
                     st.success('Application successful, you are qualified for RM 500 loan')
                 elif sqrt(sum(finance_dic.values())) >=7.93 and sqrt(sum(finance_dic.values())) < 8.89 and loan_amount==300:
                     st.success('Application successful, you are qualified for RM 300 loan')
+                elif sqrt(sum(finance_dic.values())) >=7.93 and sqrt(sum(finance_dic.values())) < 8.89 and loan_amount>500:
+                    st.warning(f'Application qualified for max RM 500 loan.')
                 else:
                     st.success(f'Application successful, you are qualified for RM {loan_amount} loan.')
 
 
-    if st.sidebar.checkbox('Explore worthiness score: '):
+    if st.sidebar.checkbox('Pod Credit Scoring Result: '):
         # st.sidebar.write(feature_dic)
         # st.sidebar.write("Total applicant worthiness score ",sum(feature_dic.values()))
-        st.sidebar.write("Total applicant credibility factor ", float("{:.2f}".format(sqrt(sum(feature_dic.values())))))
-        st.sidebar.info('The minimum threshold to qualify is at least 2 points.\nThis score can be boosted if the person have higher education, older, or has no credit cards.')
+        st.sidebar.write("Total credit score: ",float("{:.2f}".format(sqrt(sum(feature_dic.values()))+sqrt(sum(finance_dic.values())))))
+        st.sidebar.info('The minimum score is 9.9 and maximum 20.\napplication details has varying effect in the scoring computation as not all the details weighted equally. Education and being a pod user for a period of time can boost the score especially if coupled with good weekly/monthly income.')
+        if st.sidebar.checkbox('Explore credit score: '):
+            st.sidebar.write("Total applicant credibility factor ", float("{:.2f}".format(sqrt(sum(feature_dic.values())))))
+            st.sidebar.write(feature_dic)
+            st.sidebar.info('The minimum threshold to qualify is at least 2 points.\nThis score can be boosted if the person have higher education, older, or has no credit cards.')
 
-        # st.sidebar.write("Total income ",income if timebase=="Full-time" else income+gig_w_income*4)
-        # st.sidebar.write("Weekly median income ",np.median(weekly_gig_amount))
-        # st.sidebar.write(finance_dic)
-        # st.sidebar.write(sum(finance_dic.values()))
-        st.sidebar.write("Total applicant finance hygiene ", float("{:.2f}".format(sqrt(sum(finance_dic.values())))))
-        st.sidebar.info('The minimum threshold is 7.9.\nThis finance can be improved if the person has higher income, covered by insurance, is a pod user, and or been in the gig economy for longer.')
+            # st.sidebar.write("Total income ",income if timebase=="Full-time" else income+gig_w_income*4)
+            # st.sidebar.write("Weekly median income ",np.median(weekly_gig_amount))
+            # st.sidebar.write(finance_dic)
+            # st.sidebar.write(sum(finance_dic.values()))
+            st.sidebar.write("Total applicant finance hygiene ", float("{:.2f}".format(sqrt(sum(finance_dic.values())))))
+            st.sidebar.write(finance_dic, get_state(address))
+            st.sidebar.info('The minimum threshold is 7.9.\nThis finance can be improved if the person has higher income, covered by insurance, is a pod user, and or been in the gig economy for longer.')
 
 
 if applicant_type=="Employee":
@@ -479,6 +552,10 @@ if applicant_type=="Employee":
                 'Monthly salary :',
                 0,30000,0,100, "%f"
             )
+        insurance = st.radio(
+            f'Do you have medical and life insurance under the employment benefit?',
+            ("Yes", "Not sure", "No", "Only Medical")
+        )
     with colb:
         experience = st.number_input(
                 'Years of experience :',
@@ -486,9 +563,10 @@ if applicant_type=="Employee":
             )
     # Load data
     st.header('Geo-location')
-    profile = st.selectbox('Choose a geo-activity profile'
-                ,['profile1', 'profile2', 'profile3']
+    profile_name = st.selectbox('Choose a geo-activity profile'
+                ,['Average traveling', 'Traveling for work', 'Frequently traveling']
                 )
+    profile = geofile_name(profile_name)
 
     DATA_URL = (profile+'.csv')
 
@@ -535,14 +613,101 @@ if applicant_type=="Employee":
     st.header('Loan')
     loan_amount = st.select_slider('How much do you want to borrow?', options=[300, 500, 800], format_func=formatloan)
 
-    st.button("Evaluate")
+    if pod_user == "Yes" and amount_saved >0:
+        saved_value = np.log(amount_saved)
+    elif pod_user == "Yes" and amount_saved ==0:
+        saved_value = 1
+    else:
+        saved_value = 0
+
+    feature_dic = {
+        "age_score": sqrt(age)%5 if age >=25 else 0,
+        "marital_score": ["Single", "Married", "Widow", "Divorced"].index(marital_status),
+        "education_score": ['SPM', 'Diploma', 'Associate degree', 'Degree', 'Masters', 'Phd'].index(education),
+        "dependant_score": 0 if dependants == 0 else 2 if dependants < 4 else 1,
+        "ncc_score": 1 if ncc ==0 else 0 if ncc==1 else -1,
+        "pod_savings_score": saved_value
+    }
+    
+    if get_state(address)=="Selangor" or get_state(address)=="Wilayah Persekutuan":
+    
+        finance_dic = {
+            "total_squared_income": sqrt(income),
+            "weekly_squared_income": (sqrt(income)/4.5),#sqrt(np.median(weekly_gig_amount)),
+            "insure_score": 2 if insurance=="Yes" else 1 if insurance=="Only Medical" else 0,
+            "duration_score": (experience/10)*3,
+            "Geo-activity_profile": 10 if profile_name=='Average traveling' else 1 if profile_name=='Traveling for work' else 0,
+            # "Location weightage": 5
+        }
+    else:
+        finance_dic = {
+            "total_squared_income": sqrt(income),
+                "weekly_squared_income": (sqrt(income)/4.5),#sqrt(np.median(weekly_gig_amount)),
+                "insure_score": 2 if insurance=="Yes" else 1 if insurance=="Only Medical" else 0,
+                "duration_score": (experience/10)*3,
+                "Geo-activity_profile": 10 if profile_name=='Average traveling' else 1 if profile_name=='Traveling for work' else 0,
+                # "Location weightage": 0
+        }
+
+    if st.button("Evaluate", key="evaluate_employee"):
+        if (not income) or  (not experience):
+            st.error('Sorry!! fields cannot be empty, please fill missing fields')
+        else:
+            'Loan Application is being evaluated...'
+            # Add a placeholder
+            latest_iteration = st.empty()
+            bar = st.progress(0)
+
+            rantot = np.random.randint(low=3, high=10, size=3)[0]
+            # st.success('This is a success message!')
+            # st.info('This is a purely informational message')
+            for i in range(100):
+                # Update the progress bar with each iteration.
+                latest_iteration.text(f'Progress {i+1}%')
+                bar.progress(i + 1)
+                time.sleep(0.01)
+
+            if sqrt(sum(feature_dic.values())) < 1.99:
+                st.error('Loan application rejected due to high risk score!!')            
+            else:
+                if sqrt(sum(finance_dic.values())) <7.93:
+                    st.success('Application successful, you are qualified for RM 300 loan')
+                elif sqrt(sum(finance_dic.values())) >=7.93 and sqrt(sum(finance_dic.values())) < 8.89 and loan_amount==500:
+                    st.success('Application successful, you are qualified for RM 500 loan')
+                elif sqrt(sum(finance_dic.values())) >=7.93 and sqrt(sum(finance_dic.values())) < 8.89 and loan_amount==300:
+                    st.success('Application successful, you are qualified for RM 300 loan')
+                elif sqrt(sum(finance_dic.values())) >=7.93 and sqrt(sum(finance_dic.values())) < 8.89 and loan_amount>500:
+                    st.warning(f'Application qualified for max RM 500 loan.')
+                else:
+                    st.success(f'Application successful, you are qualified for RM {loan_amount} loan.')
+
+
+
+    if st.sidebar.checkbox('Pod Credit Scoring Result: '):
+        # st.sidebar.write(feature_dic)
+        # st.sidebar.write("Total applicant worthiness score ",sum(feature_dic.values()))
+        st.sidebar.write("Total credit score: ",float("{:.2f}".format(sqrt(sum(feature_dic.values()))+sqrt(sum(finance_dic.values())))))
+        st.sidebar.info('The minimum score is 9.9 and maximum 20.\napplication details has varying effect in the scoring computation as not all the details weighted equally. Education and being a pod user for a period of time can boost the score especially if coupled with good weekly/monthly income.')
+        if st.sidebar.checkbox('Explore credit score: '):
+            st.sidebar.write("Total applicant credibility factor ", float("{:.2f}".format(sqrt(sum(feature_dic.values())))))
+            st.sidebar.write(feature_dic)
+            st.sidebar.info('The minimum threshold to qualify is at least 2 points.\nThis score can be boosted if the person have higher education, older, or has no credit cards.')
+
+            # st.sidebar.write("Total income ",income if timebase=="Full-time" else income+gig_w_income*4)
+            # st.sidebar.write("Weekly median income ",np.median(weekly_gig_amount))
+            # st.sidebar.write(finance_dic)
+            # st.sidebar.write(sum(finance_dic.values()))
+            st.sidebar.write("Total applicant finance hygiene ", float("{:.2f}".format(sqrt(sum(finance_dic.values())))))
+            # st.sidebar.write(finance_dic, get_state(address))
+            st.sidebar.info('The minimum threshold is 7.9.\nThis finance can be improved if the person has higher income, covered by insurance, is a pod user, and or been in the gig economy for longer.')
+
 
 
 if applicant_type=="Self Employed":
     st.header('Self Employed')
     industry = st.selectbox(
         'Industry: ',
-        ('Public sector (General)'
+        ('IT Freelancing'
         ,'Engineering'
         ,'Medical and Pharmaceutical'
         ,'Electrical & Electronics'
@@ -564,23 +729,163 @@ if applicant_type=="Self Employed":
     with coli:
         income = st.number_input(
                 'Monthly Revenue :',
-                0,30000,3000,1000, "%f"
+                0,150000,3000,1000, "%f"
             )
     with colii:
         experience = st.number_input(
                 'Years in business :',
                 0,50,1,1, "%d"
             )
+        
     coliii, colvi = st.beta_columns(2)
     with coliii:
-        typeofbusiness = st.radio(
-        'Registration type of business',
-        ("Enterprise", "Sole proprietorship", "SDN BHD", "Not registered")
-    )
+        insurance = st.radio(
+            f'Do you have medical and life insurance under the employment benefit?',
+            ("Yes", "Not sure", "No", "Only Medical")
+        )
+        
     with colvi:
+        typeofbusiness = st.radio(
+            'Registration type of business',
+            ("Enterprise", "Sole proprietorship", "SDN BHD", "Not registered")
+        )
         business_reg_num = st.text_input("Business registration number")
+
+    # Load data
+    st.header('Geo-location')
+    profile_name = st.selectbox('Choose a geo-activity profile'
+                ,['Average traveling', 'Traveling for work', 'Frequently traveling']
+                )
+    profile = geofile_name(profile_name)
+
+    DATA_URL = (profile+'.csv')
+
+    @st.cache(allow_output_mutation=True)
+    def load_data():
+        data = pd.read_csv(DATA_URL)
+        return data
+
+    # Load rows of data into the dataframe.
+    df = load_data()
+    view = pdk.ViewState(latitude=2.94485,
+                        longitude=101.586463)
+
+    # Create the scatter plot layer
+    covidLayer = pdk.Layer(
+            "HexagonLayer",
+            data=df,
+            pickable=False,
+            opacity=0.3,
+            stroked=True,
+            filled=True,
+            radius_scale=10,
+            radius_min_pixels=5,
+            radius_max_pixels=60,
+            line_width_min_pixels=1,
+            get_position=["Longitude", "Latitude"],
+            get_fill_color=[180, 0, 200, 140],
+            get_line_color=[255,0,0],
+            tooltip="test test",
+            elevation_scale=50,
+            elevation_range=[0, 3000],
+        )
+
+    # Create the deck.gl map
+    r = pdk.Deck(
+        layers=[covidLayer],
+        initial_view_state=view,
+        map_style="mapbox://styles/mapbox/light-v10",
+    )
+
+    # Render the deck.gl map in the Streamlit app as a Pydeck chart 
+    map = st.pydeck_chart(r)
 
     st.header('Loan')
     loan_amount = st.select_slider('How much do you want to borrow?', options=[300, 500, 800], format_func=formatloan)
 
-    st.button("Evaluate")
+    if pod_user == "Yes" and amount_saved >0:
+        saved_value = np.log(amount_saved)
+    elif pod_user == "Yes" and amount_saved ==0:
+        saved_value = 1
+    else:
+        saved_value = 0
+
+    feature_dic = {
+        "age_score": sqrt(age)%5 if age >=25 else 0,
+        "marital_score": ["Single", "Married", "Widow", "Divorced"].index(marital_status),
+        "education_score": ['SPM', 'Diploma', 'Associate degree', 'Degree', 'Masters', 'Phd'].index(education),
+        "dependant_score": 0 if dependants == 0 else 2 if dependants < 4 else 1,
+        "ncc_score": 1 if ncc ==0 else 0 if ncc==1 else -1,
+        "pod_savings_score": saved_value
+    }
+    
+    if get_state(address)=="Selangor" or get_state(address)=="Wilayah Persekutuan":
+    
+        finance_dic = {
+            "total_squared_income": sqrt(income),
+            "weekly_squared_income": (sqrt(income)/4.5),#sqrt(np.median(weekly_gig_amount)),
+            "insure_score": 2 if insurance=="Yes" else 1 if insurance=="Only Medical" else 0,
+            "duration_score": (experience/10)*3,
+            "Geo-activity_profile": 10 if profile_name=='Average traveling' else 1 if profile_name=='Traveling for work' else 0,
+            # "Location weightage": 5
+        }
+    else:
+        finance_dic = {
+            "total_squared_income": sqrt(income),
+                "weekly_squared_income": (sqrt(income)/4.5),#sqrt(np.median(weekly_gig_amount)),
+                "insure_score": 2 if insurance=="Yes" else 1 if insurance=="Only Medical" else 0,
+                "duration_score": (experience/10)*3,
+                "Geo-activity_profile": 10 if profile_name=='Average traveling' else 1 if profile_name=='Traveling for work' else 0,
+                # "Location weightage": 0
+        }
+
+    if st.button("Evaluate", key="evaluate_selfemployed"):
+        if (not income) or  (not experience) or (not business_reg_num):
+            st.error('Sorry!! fields cannot be empty, please fill missing fields')
+        else:
+            'Loan Application is being evaluated...'
+            # Add a placeholder
+            latest_iteration = st.empty()
+            bar = st.progress(0)
+
+            rantot = np.random.randint(low=3, high=10, size=3)[0]
+            # st.success('This is a success message!')
+            # st.info('This is a purely informational message')
+            for i in range(100):
+                # Update the progress bar with each iteration.
+                latest_iteration.text(f'Progress {i+1}%')
+                bar.progress(i + 1)
+                time.sleep(0.01)
+
+            if sqrt(sum(feature_dic.values())) < 1.99:
+                st.error('Loan application rejected due to high risk score!!')            
+            else:
+                if sqrt(sum(finance_dic.values())) <7.93:
+                    st.success('Application successful, you are qualified for RM 300 loan')
+                elif sqrt(sum(finance_dic.values())) >=7.93 and sqrt(sum(finance_dic.values())) < 8.89 and loan_amount==500:
+                    st.success('Application successful, you are qualified for RM 500 loan')
+                elif sqrt(sum(finance_dic.values())) >=7.93 and sqrt(sum(finance_dic.values())) < 8.89 and loan_amount==300:
+                    st.success('Application successful, you are qualified for RM 300 loan')
+                elif sqrt(sum(finance_dic.values())) >=7.93 and sqrt(sum(finance_dic.values())) < 8.89 and loan_amount>500:
+                    st.warning(f'Application qualified for max RM 500 loan.')
+                else:
+                    st.success(f'Application successful, you are qualified for RM {loan_amount} loan.')
+
+    if st.sidebar.checkbox('Pod Credit Scoring Result: '):
+        # st.sidebar.write(feature_dic)
+        # st.sidebar.write("Total applicant worthiness score ",sum(feature_dic.values()))
+        st.sidebar.write("Total credit score: ",float("{:.2f}".format(sqrt(sum(feature_dic.values()))+sqrt(sum(finance_dic.values())))))
+        st.sidebar.info('The minimum score is 9.9 and maximum 20.\napplication details has varying effect in the scoring computation as not all the details weighted equally. Education and being a pod user for a period of time can boost the score especially if coupled with good weekly/monthly income.')
+        if st.sidebar.checkbox('Explore credit score: '):
+            st.sidebar.write("Total applicant credibility factor ", float("{:.2f}".format(sqrt(sum(feature_dic.values())))))
+            st.sidebar.write(feature_dic)
+            st.sidebar.info('The minimum threshold to qualify is at least 2 points.\nThis score can be boosted if the person have higher education, older, or has no credit cards.')
+
+            # st.sidebar.write("Total income ",income if timebase=="Full-time" else income+gig_w_income*4)
+            # st.sidebar.write("Weekly median income ",np.median(weekly_gig_amount))
+            # st.sidebar.write(finance_dic)
+            # st.sidebar.write(sum(finance_dic.values()))
+            st.sidebar.write("Total applicant finance hygiene ", float("{:.2f}".format(sqrt(sum(finance_dic.values())))))
+            # st.sidebar.write(finance_dic, get_state(address))
+            st.sidebar.write(finance_dic)
+            st.sidebar.info('The minimum threshold is 7.9.\nThis finance can be improved if the person has higher income, covered by insurance, is a pod user, and or been in the gig economy for longer.')
